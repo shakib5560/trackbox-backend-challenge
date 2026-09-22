@@ -1,10 +1,12 @@
 import sys
 import logging
+import uuid
 from config import AppConfig
 from detector import SyntheticFieldDetector
 from pipeline import VideoProcessingPipeline
 from synthetic_generator import generate_synthetic_video
 from models import ProcessingStatus
+from reporter import HttpMockApiReporter, DummyReporter
 
 # Configure basic logging
 logging.basicConfig(
@@ -30,11 +32,17 @@ DEFAULT_CONFIG = {
     "debug_mode": True,
 }
 
+import os
+
 def load_config() -> AppConfig:
     # In a real application, this would load from os.environ, .env files, etc.
     # Here, we validate the dictionary through Pydantic to fulfill Part 1 requirement
     # "reject malformed values", "fail immediately during application startup"
-    return AppConfig(**DEFAULT_CONFIG)
+    config_dict = DEFAULT_CONFIG.copy()
+    if "MOCK_API_URL" in os.environ:
+        config_dict["reporting_base_url"] = os.environ["MOCK_API_URL"]
+    
+    return AppConfig(**config_dict)
 
 def main():
     # 1. Load and validate configuration
@@ -49,9 +57,17 @@ def main():
 
     # 2. Initialize dependencies (the single seam)
     detector = SyntheticFieldDetector(config.field_detector)
+    
+    # 2.5 Setup Reporter
+    if config.reporting_base_url:
+        reporter = HttpMockApiReporter(config.reporting_base_url)
+    else:
+        reporter = DummyReporter()
+
+    job_id = str(uuid.uuid4())
 
     # 3. Construct the pipeline
-    pipeline = VideoProcessingPipeline(config, detector)
+    pipeline = VideoProcessingPipeline(config, detector, job_id, reporter)
 
     # 4. Invoke the pipeline
     result = pipeline.run()

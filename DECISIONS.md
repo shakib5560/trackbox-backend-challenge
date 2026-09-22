@@ -46,3 +46,21 @@ Instead of spamming `print()` for every frame, progress is periodically emitted 
 
 ### 6. Handling unexpected exceptions
 In `detector.py`, the extremely broad `except Exception: pass` was removed. If `cv2.findContours` fails unpredictably, it will now crash the frame, bubble up, be logged with full `exc_info` by the pipeline, and safely terminate the run as `FAILED`. No real failure is silently swallowed anymore.
+
+## Part 4: Reporting Decisions
+
+### 1. API integration
+The pipeline uses the `mock_api` exactly as provided. It POSTs to `/api/v1/jobs/events` for lifecycle events (`STARTED`, `SUCCESS`, `FAILED`) and `/api/v1/jobs/progress` for periodic frame-inspection updates.
+
+### 2. Reporting lifecycle & Payload validation
+The reporting payloads are rigorously typed via Pydantic (`JobEventPayload` and `JobProgressPayload`). These enforce the schema required for the HTTP layer without relying on arbitrary `dict` structures passed around the codebase.
+
+### 3. Reporting failure policy
+A pipeline's core responsibility is analyzing video. The HTTP reporter uses a brief timeout (5 seconds). If a request to `mock_api` fails (timeout, connection refused), `requests.RequestException` is caught, logged as a `WARNING`, and processing continues. 
+This guarantees that **a reporting failure does not become a pipeline failure**. The underlying video analysis succeeds regardless of the orchestration layer's availability.
+
+### 4. Retry policy
+I did not introduce exponential backoff or retry logic. Given the high-frequency nature of progress updates (every 100 frames), a failed progress report will simply be superseded by the next one. For lifecycle events (`SUCCESS`), a robust system would use a message queue, but introducing Kafka or Redis here violates the assignment's warning against unnecessary infrastructure.
+
+### 5. Production considerations
+In a real production environment, if the final `SUCCESS` report is critical for downstream billing/orchestration, I would implement an Outbox pattern where pipeline results are committed to a local SQLite database and a separate background thread/process reliably syncs them to the API.

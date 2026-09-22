@@ -18,4 +18,5 @@ class AppConfig(BaseModel):
     crop_search: CropSearchConfig
     inspection_interval_frames: int = Field(default=1, ge=1)
     max_inspected_frames: Optional[int] = Field(default=None, ge=1)
+    reporting_base_url: Optional[str] = None
     debug_mode: bool = False

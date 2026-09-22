@@ -83,9 +83,26 @@ The pipeline is now observable and robust enough for unattended batch processing
 - **Fatal Error Propagation**: Unexpected exceptions are no longer silently swallowed. They are caught at the pipeline boundary, logged as an `ERROR` with a stack trace, and gracefully terminate the run.
 - **Logging vs Printing**: Standard Python `logging` provides periodic `INFO` progress heartbeats (every 100 frames) tracking valid and invalid observation counts, preventing console spam while offering a clear view of processing health.
 
+## Part 4: Reporting to Platform
+
+The pipeline now functions as a microservice running inside a Docker Compose network, communicating its lifecycle and progress to `mock_api` without blocking processing.
+
+- **Docker Architecture**: The `runner` service is built from the `Dockerfile` and talks to the `mock_api` container via the `MOCK_API_URL` environment variable configured in `docker-compose.yml`.
+- **API Payloads**: Payload shape is strictly enforced by Pydantic models (`JobEventPayload`, `JobProgressPayload`).
+- **Resilience**: If the `mock_api` container crashes, the pipeline issues a warning but continues processing the video successfully, ensuring reporting failures do not corrupt data extraction.
+
 ## Running the Code
 
-To run the main pipeline:
+### With Docker (Full Integration)
+To run the entire system including `mock_api` and the pipeline runner:
+
+```bash
+docker compose up --build
+```
+You will see both the `mock_api` logging HTTP requests and the `runner` processing the synthetic video feed.
+
+### Locally (Standalone)
+To run the main pipeline locally without the reporter (it will silently mock it):
 ```bash
 python3 main.py
 ```

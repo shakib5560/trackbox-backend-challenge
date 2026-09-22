@@ -6,16 +6,21 @@ from shapely.geometry import Polygon
 from config import AppConfig
 from models import DetectionResult, PipelineRunResult, ProcessingStatus, ObservationStatus
 from detector import FieldDetector
+from reporter import Reporter, DummyReporter
 
 logger = logging.getLogger(__name__)
 
 class VideoProcessingPipeline:
-    def __init__(self, config: AppConfig, detector: FieldDetector):
+    def __init__(self, config: AppConfig, detector: FieldDetector, job_id: str, reporter: Reporter = None):
         self.config = config
         self.detector = detector
+        self.job_id = job_id
+        self.reporter = reporter or DummyReporter()
 
     def run(self) -> PipelineRunResult:
         logger.info(f"Starting processing for video: {self.config.video_path}")
+        self.reporter.report_start(self.job_id)
+        
         cap = cv2.VideoCapture(self.config.video_path)
 
         if not cap.isOpened():
@@ -75,9 +80,10 @@ class VideoProcessingPipeline:
                 )
                 detected_results.append(result)
                 
-                # Periodic progress logging
+                # Periodic progress logging and reporting
                 if inspected_count % 100 == 0:
                     logger.info(f"Progress: Inspected {inspected_count} frames, {len(detected_results)} valid, {invalid_count} invalid.")
+                    self.reporter.report_progress(self.job_id, inspected_count, len(detected_results), invalid_count)
 
                 if max_inspected and inspected_count >= max_inspected:
                     logger.info(f"Reached max_inspected_frames ({max_inspected}). Stopping early.")
@@ -87,6 +93,7 @@ class VideoProcessingPipeline:
             # Fatal pipeline failure catching any unhandled runtime exceptions
             error_msg = f"Fatal exception during frame processing: {str(e)}"
             logger.error(error_msg, exc_info=True)
+            self.reporter.report_failure(self.job_id, error_msg)
             cap.release()
             return PipelineRunResult(
                 status=ProcessingStatus.FAILED,
@@ -98,6 +105,12 @@ class VideoProcessingPipeline:
 
         cap.release()
         logger.info(f"Pipeline completed successfully. Inspected {inspected_count} frames. Found {len(detected_results)} valid boundaries, {invalid_count} invalid.")
+        
+        self.reporter.report_success(self.job_id, {
+            "frames_inspected": inspected_count,
+            "valid_boundaries": len(detected_results),
+            "invalid_boundaries": invalid_count
+        })
         
         return PipelineRunResult(
             status=ProcessingStatus.SUCCESS,
