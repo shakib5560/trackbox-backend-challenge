@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 class FieldDetectorConfig(BaseModel):
@@ -16,4 +16,6 @@ class AppConfig(BaseModel):
     confidence_threshold: float = Field(..., ge=0.0, le=1.0)
     field_detector: FieldDetectorConfig
     crop_search: CropSearchConfig
+    inspection_interval_frames: int = Field(default=1, ge=1)
+    max_inspected_frames: Optional[int] = Field(default=None, ge=1)
     debug_mode: bool = False

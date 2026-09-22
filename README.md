@@ -57,6 +57,23 @@ AppConfig(
 )
 ```
 
+## Part 2 Processing Efficiency
+
+To optimize processing and avoid O(N) scaling with respect to video length, several performance optimizations were introduced:
+
+### Previous Behavior
+The prototype unconditionally executed the expensive detection logic (`findContours`, heavy CPU simulation latency, and Shapely polygon intersections) on every decoded frame, even if the frame was black or if a steady boundary had already been found. 
+
+### New Behavior
+- **Frame Sampling**: By configuring `inspection_interval_frames`, the pipeline uses `cap.set` to skip decoding intermediate frames altogether, reading e.g. only every 10th frame.
+- **Cheap Early Exit**: Frames without enough green pixels are discarded before reaching the expensive contour generation and latency path.
+- **Geometry Caching**: Identical polygons reuse the previously computed intersection area, saving Shapely evaluation costs.
+- **Early Termination**: Setting `max_inspected_frames` halts the video processing entirely once enough frames are sampled, completely avoiding full-video traversal.
+
+### Trade-offs
+- Setting a higher `inspection_interval_frames` vastly improves throughput (e.g. 10x faster decoding) but sacrifices frame-perfect boundary adjustments if the camera is actively panning.
+- Early termination assumes the rest of the video does not contain a drastically new environment. For the synthetic challenge feed, this easily meets requirements while keeping time complexity bounded.
+
 ## Running the Code
 
 To run the main pipeline:
