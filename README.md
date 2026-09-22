@@ -74,6 +74,15 @@ The prototype unconditionally executed the expensive detection logic (`findConto
 - Setting a higher `inspection_interval_frames` vastly improves throughput (e.g. 10x faster decoding) but sacrifices frame-perfect boundary adjustments if the camera is actively panning.
 - Early termination assumes the rest of the video does not contain a drastically new environment. For the synthetic challenge feed, this easily meets requirements while keeping time complexity bounded.
 
+## Part 3 Failure Handling and Observability
+
+The pipeline is now observable and robust enough for unattended batch processing:
+
+- **Structured Results**: The pipeline returns a `PipelineRunResult` differentiating between `ProcessingStatus.SUCCESS` and `FAILED`.
+- **Invalid Observation Segregation**: Frames that fail to produce a valid field boundary (e.g. camera cuts) are explicitly tracked as invalid and are skipped from downstream metric aggregations. They do not crash the pipeline, nor do they silently poison metrics with `0` or `None`.
+- **Fatal Error Propagation**: Unexpected exceptions are no longer silently swallowed. They are caught at the pipeline boundary, logged as an `ERROR` with a stack trace, and gracefully terminate the run.
+- **Logging vs Printing**: Standard Python `logging` provides periodic `INFO` progress heartbeats (every 100 frames) tracking valid and invalid observation counts, preventing console spam while offering a clear view of processing health.
+
 ## Running the Code
 
 To run the main pipeline:

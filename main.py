@@ -1,8 +1,17 @@
 import sys
+import logging
 from config import AppConfig
 from detector import SyntheticFieldDetector
 from pipeline import VideoProcessingPipeline
 from synthetic_generator import generate_synthetic_video
+from models import ProcessingStatus
+
+# Configure basic logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # A fallback dictionary in case we want to emulate environment loading
 DEFAULT_CONFIG = {
@@ -32,7 +41,7 @@ def main():
     try:
         config = load_config()
     except Exception as e:
-        print(f"Startup Error: Invalid configuration.\n{e}")
+        logger.error(f"Startup Error: Invalid configuration.\n{e}")
         sys.exit(1)
 
     # Helper to generate input file if it doesn't exist locally
@@ -45,9 +54,13 @@ def main():
     pipeline = VideoProcessingPipeline(config, detector)
 
     # 4. Invoke the pipeline
-    results = pipeline.run()
+    result = pipeline.run()
     
-    print(f"Pipeline finished with {len(results)} results.")
+    if result.status == ProcessingStatus.FAILED:
+        logger.error(f"Pipeline failed: {result.error_message}")
+        sys.exit(1)
+    
+    logger.info(f"Pipeline finished with SUCCESS. Valid results: {len(result.valid_results)}, Invalid: {result.invalid_count}")
 
 if __name__ == "__main__":
     main()

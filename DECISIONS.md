@@ -26,3 +26,23 @@ It strikes the balance between skipping unnecessary work and preserving correct 
 
 ### 6. Validation for production
 Before deploying to production, I would benchmark `cap.set` seek times against actual stadium feeds to ensure skipping frames is faster than sequentially reading and dropping them. I would also validate if `max_inspected_frames` provides enough robustness in feeds that include mid-match camera resets.
+
+## Part 3: Failure handling decisions
+
+### 1. Which failures stop the pipeline?
+Unexpected runtime errors (e.g., OpenCV memory exhaustion, OS `IOError` when reading the feed) are caught at the top level of `pipeline.run()`, logged as fatal `ERROR`s, and stop the pipeline, returning `ProcessingStatus.FAILED`. This prevents the pipeline from thrashing indefinitely or returning partial results disguised as a full success.
+
+### 2. Which failures are recoverable?
+If `detector.detect()` fails to find a polygon because a frame lacks a pitch or contains noise, this is a normal occurrence in the synthetic feed (e.g., camera cuts or close-ups). The pipeline correctly identifies this as an invalid frame, increments an `invalid_count`, and continues processing the next frame.
+
+### 3. Missing/invalid field detection
+An invalid observation explicitly skips the `poly.intersection()` math. It is NOT appended to the `valid_results` array. This ensures downstream aggregate metrics are not poisoned by `None` values or hallucinated fallback shapes.
+
+### 4. Zero valid detections
+If a video contains zero valid detections, the pipeline completes with `ProcessingStatus.SUCCESS` and an empty `valid_results` list. This correctly reflects reality: the pipeline succeeded in inspecting the video, but the video contained no pitches. 
+
+### 5. Progress exposure
+Instead of spamming `print()` for every frame, progress is periodically emitted via `logger.info()` every 100 frames. This gives the operator a heartbeat to track the ratio of valid vs invalid frames over time without polluting the console output.
+
+### 6. Handling unexpected exceptions
+In `detector.py`, the extremely broad `except Exception: pass` was removed. If `cv2.findContours` fails unpredictably, it will now crash the frame, bubble up, be logged with full `exc_info` by the pipeline, and safely terminate the run as `FAILED`. No real failure is silently swallowed anymore.

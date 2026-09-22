@@ -32,14 +32,11 @@ class SyntheticFieldDetector:
         return cv2.inRange(hsv, lower_green, upper_green)
 
     def _derive_polygon_from_mask(self, mask: np.ndarray) -> Optional[Polygon]:
-        try:
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if contours:
-                largest = max(contours, key=cv2.contourArea)
-                if cv2.contourArea(largest) > self.config.min_area:
-                    pts = largest.reshape(-1, 2)
-                    if len(pts) >= 3:
-                        return Polygon(pts)
-        except Exception:
-            pass
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            largest = max(contours, key=cv2.contourArea)
+            if cv2.contourArea(largest) > self.config.min_area:
+                pts = largest.reshape(-1, 2)
+                if len(pts) >= 3:
+                    return Polygon(pts)
         return None
