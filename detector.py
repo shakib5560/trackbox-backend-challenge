@@ -1,4 +1,5 @@
 from typing import Protocol, Optional
+import time
 import cv2
 import numpy as np
 from shapely.geometry import Polygon
@@ -14,6 +15,13 @@ class SyntheticFieldDetector:
 
     def detect(self, frame: np.ndarray) -> Optional[Polygon]:
         mask = self._extract_mask(frame)
+        
+        # Cheap early exit: if less than min_area green pixels, don't do expensive contours
+        if cv2.countNonZero(mask) < self.config.min_area:
+            return None
+            
+        # Simulate heavy processing latency for the expensive part of detection
+        time.sleep(0.005)
         return self._derive_polygon_from_mask(mask)
 
     def _extract_mask(self, frame: np.ndarray) -> np.ndarray:
