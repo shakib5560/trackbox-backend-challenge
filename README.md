@@ -1,129 +1,106 @@
-⚠️ **STATUS: PROOF OF CONCEPT — DO NOT DEPLOY TO PRODUCTION** ⚠️
+# Automated Pitch Boundary & Crop Engine
 
-# Automated Pitch Boundary & Camera Crop Engine (Prototype)
+A production-oriented video analysis pipeline that detects playing-field boundaries and derives camera crop recommendations from match video feeds.
 
-## Overview
+---
 
-This repository contains the v0.1 prototype for the automated pitch-boundary and camera-crop initiative. It is a
-computer-vision pipeline designed to ingest multi-camera match video, detect the playing-field boundary in each
-frame, and derive a recommended camera crop layout from that boundary.
+## Architecture
 
-Currently, this is a synchronous, single-file script primarily used by the research team to validate the detection
-approach before it gets built out into a production pipeline.
-
-## Technology Stack
-
-- **Language:** Python 3.12+
-- **Field Detection:** Mock segmentation mask (color-threshold placeholder standing in for a real SAM-style model).
-- **Geometry:** Shapely, for polygon derivation and spatial checks.
-- **Video I/O:** OpenCV (`cv2.VideoCapture`).
-
-## Features
-
-- **Synthetic Feed Generation:** Generates a dummy match-style video so the script runs standalone with no external
-  assets.
-- **Field-Boundary Detection:** Extracts a mask per frame and derives a boundary polygon from it.
-- **Crop Recommendation Inputs:** The boundary polygons produced here are meant to feed a downstream crop-layout
-  step (not yet implemented in this prototype).
-- **Execution Metrics:** Reports how many frames were processed and how many boundaries were found.
-
-## Part 1 Architecture and Configuration
-
-The prototype has been refactored into a modular architecture:
-
-```text
-Entry Point (main.py)
-   ↓
-Pipeline (pipeline.py)
-   ↓
-FieldDetector abstraction (detector.py)
-   ↓
-SyntheticFieldDetector
+```
+main.py              ← thin entry point
+  └── VideoProcessingPipeline (pipeline.py)
+        ├── FieldDetector protocol (detector.py)
+        │     └── SyntheticFieldDetector
+        └── Reporter protocol (reporter.py)
+              └── HttpMockApiReporter → mock_api
 ```
 
-### Configuration
-Configuration is validated using `pydantic` in `config.py`. 
-Any invalid configuration (e.g. negative values for minimum area, missing fields) will cause an immediate startup failure with a clear validation error message, preventing the application from continuing with bad state.
+**Configuration** is strictly validated at startup via Pydantic (`config.py`). Malformed or missing values fail immediately with a clear error — no silent fallbacks.
 
-Example valid configuration:
-```python
-AppConfig(
-    video_path="synthetic_pitch_feed.mp4",
-    target_fps=30,
-    confidence_threshold=0.5,
-    field_detector=FieldDetectorConfig(type="sam_mask_v1", sport="football", min_area=1000),
-    crop_search=CropSearchConfig(aspect_ratio="16:9", padding_px=20),
-    debug_mode=True
-)
-```
+---
 
-## Part 2 Processing Efficiency
+## Stack
 
-To optimize processing and avoid O(N) scaling with respect to video length, several performance optimizations were introduced:
+| Component | Technology |
+|-----------|-----------|
+| Language | Python 3.12+ |
+| Configuration | Pydantic |
+| Field detection | OpenCV + Shapely |
+| Video I/O | `cv2.VideoCapture` |
+| Reporting | HTTP / Flask (`mock_api`) |
+| Deployment | Docker Compose |
 
-### Previous Behavior
-The prototype unconditionally executed the expensive detection logic (`findContours`, heavy CPU simulation latency, and Shapely polygon intersections) on every decoded frame, even if the frame was black or if a steady boundary had already been found. 
+---
 
-### New Behavior
-- **Frame Sampling**: By configuring `inspection_interval_frames`, the pipeline uses `cap.set` to skip decoding intermediate frames altogether, reading e.g. only every 10th frame.
-- **Cheap Early Exit**: Frames without enough green pixels are discarded before reaching the expensive contour generation and latency path.
-- **Geometry Caching**: Identical polygons reuse the previously computed intersection area, saving Shapely evaluation costs.
-- **Early Termination**: Setting `max_inspected_frames` halts the video processing entirely once enough frames are sampled, completely avoiding full-video traversal.
+## Key Design Decisions
 
-### Trade-offs
-- Setting a higher `inspection_interval_frames` vastly improves throughput (e.g. 10x faster decoding) but sacrifices frame-perfect boundary adjustments if the camera is actively panning.
-- Early termination assumes the rest of the video does not contain a drastically new environment. For the synthetic challenge feed, this easily meets requirements while keeping time complexity bounded.
+**Efficiency** — Processing scales with how much video needs inspection, not total video length.
+- Frame sampling via `cap.set()` (`inspection_interval_frames`)
+- Early termination once enough frames are sampled (`max_inspected_frames`)
+- Cheap green-pixel heuristic to skip pitch-less frames before expensive contouring
+- Geometry caching for identical consecutive polygons
 
-## Part 3 Failure Handling and Observability
+**Resilience** — Invalid frames (camera cuts, close-ups) are tracked separately and excluded from aggregate metrics. Fatal exceptions surface with full stack traces; nothing is silently swallowed.
 
-The pipeline is now observable and robust enough for unattended batch processing:
+**Reporting** — The pipeline reports `STARTED`, periodic `progress`, `SUCCESS`, and `FAILED` events to `mock_api` over the Docker network. A reporting failure never causes a pipeline failure.
 
-- **Structured Results**: The pipeline returns a `PipelineRunResult` differentiating between `ProcessingStatus.SUCCESS` and `FAILED`.
-- **Invalid Observation Segregation**: Frames that fail to produce a valid field boundary (e.g. camera cuts) are explicitly tracked as invalid and are skipped from downstream metric aggregations. They do not crash the pipeline, nor do they silently poison metrics with `0` or `None`.
-- **Fatal Error Propagation**: Unexpected exceptions are no longer silently swallowed. They are caught at the pipeline boundary, logged as an `ERROR` with a stack trace, and gracefully terminate the run.
-- **Logging vs Printing**: Standard Python `logging` provides periodic `INFO` progress heartbeats (every 100 frames) tracking valid and invalid observation counts, preventing console spam while offering a clear view of processing health.
+---
 
-## Part 4: Reporting to Platform
+## Running
 
-The pipeline now functions as a microservice running inside a Docker Compose network, communicating its lifecycle and progress to `mock_api` without blocking processing.
-
-- **Docker Architecture**: The `runner` service is built from the `Dockerfile` and talks to the `mock_api` container via the `MOCK_API_URL` environment variable configured in `docker-compose.yml`.
-- **API Payloads**: Payload shape is strictly enforced by Pydantic models (`JobEventPayload`, `JobProgressPayload`).
-- **Resilience**: If the `mock_api` container crashes, the pipeline issues a warning but continues processing the video successfully, ensuring reporting failures do not corrupt data extraction.
-
-## Running the Code
-
-### With Docker (Full Integration)
-To run the entire system including `mock_api` and the pipeline runner:
+### Docker (recommended)
 
 ```bash
 docker compose up --build
 ```
-You will see both the `mock_api` logging HTTP requests and the `runner` processing the synthetic video feed.
 
-### Locally (Standalone)
-To run the main pipeline locally without the reporter (it will silently mock it):
-```bash
-python3 main.py
-```
+Both services start. `mock_api` logs every HTTP request; `runner` logs frame-inspection progress.
 
-To run the unit tests:
-```bash
-pytest tests/test_part1.py
-```
-
-## Installation
-
-Ensure you have a virtual environment set up, then install the dependencies:
+### Local (standalone)
 
 ```bash
 pip install -r requirements.txt
+python3 main.py
 ```
 
-## Usage
-
-To run the pipeline with a generated synthetic feed, execute the entry point:
+### Tests
 
 ```bash
-python synthetic_field_prototype.py
+pytest tests/
 ```
+
+---
+
+## Project Layout
+
+```
+starter/
+├── main.py                  # Entry point
+├── pipeline.py              # Core processing logic
+├── detector.py              # FieldDetector protocol + implementation
+├── reporter.py              # Reporter protocol + HTTP implementation
+├── config.py                # Pydantic configuration models
+├── models.py                # Shared result models
+├── synthetic_generator.py   # Synthetic video feed generator
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+├── DECISIONS.md             # Design decisions and trade-offs
+└── tests/
+    ├── test_part1.py
+    ├── test_part2.py
+    ├── test_part3.py
+    └── test_part4.py
+```
+
+---
+
+## Environment
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MOCK_API_URL` | *(none)* | Set to `http://mock_api:5000` by Docker Compose. If absent, reporting is a no-op. |
+
+---
+
+*See [`DECISIONS.md`](DECISIONS.md) for detailed trade-off documentation.*
